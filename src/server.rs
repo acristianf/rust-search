@@ -3,7 +3,7 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::model::*;
 
-pub fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> Result<(), ()> {
+fn serve_static_file(request: Request, file_path: &str, content_type: &str) -> Result<(), ()> {
     println!(
         "Info: received request! method: {:?}, url{:?}",
         request.method(),
@@ -20,7 +20,7 @@ pub fn serve_static_file(request: Request, file_path: &str, content_type: &str) 
     })
 }
 
-pub fn serve_404(request: Request) -> Result<(), ()> {
+fn serve_404(request: Request) -> Result<(), ()> {
     request
         .respond(Response::from_string("404").with_status_code(StatusCode(404)))
         .map_err(|err| {
@@ -28,22 +28,40 @@ pub fn serve_404(request: Request) -> Result<(), ()> {
         })
 }
 
-pub fn serve_request(model: &Model, mut request: Request) -> Result<(), ()> {
+fn serve_500(request: Request) -> Result<(), ()> {
+    request
+        .respond(Response::from_string("505").with_status_code(StatusCode(505)))
+        .map_err(|err| {
+            eprintln!("Error: could not serve request; {err}");
+        })
+}
+
+fn serve_search(mut request: Request, model: &Model) -> Result<(), ()> {
+    let mut query = String::new();
+    request.as_reader().read_to_string(&mut query).unwrap();
+    let query = query.chars().collect::<Vec<_>>();
+
+    let rank = search_query(&query, &model);
+    let json = match serde_json::to_string(&rank.iter().take(20).collect::<Vec<_>>()) {
+        Ok(json) => json,
+        Err(err) => {
+            eprintln!("Error: could not convert search results to JSON; {err}");
+            return serve_500(request);
+        }
+    };
+    let content_type_header =
+        Header::from_bytes("Content-type", "application/json").expect("No garbage in headers");
+    request
+        .respond(Response::from_string(&json).with_header(content_type_header))
+        .map_err(|err| {
+            eprintln!("Error: Could not serve search; {err}");
+        })
+}
+
+fn serve_request(model: &Model, request: Request) -> Result<(), ()> {
     match request.method() {
         Method::Post => match request.url() {
-            "/api/search" => {
-                let mut query = String::new();
-                request.as_reader().read_to_string(&mut query).unwrap();
-                let query = query.chars().collect::<Vec<_>>();
-
-                let rank = search_query(&query, &model);
-
-                // TODO: Delete this print
-                println!("\n\n");
-                for (path, total_tf) in rank.iter().take(10) {
-                    println!("{path:?} => {total_tf}");
-                }
-            }
+            "/api/search" => serve_search(request, model)?,
             _ => serve_404(request)?,
         },
         Method::Get => match request.url() {

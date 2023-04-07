@@ -3,8 +3,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 // Modules
+mod lexer;
 mod model;
 mod server;
+mod snowball;
 
 use model::*;
 use server::*;

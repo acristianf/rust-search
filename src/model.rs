@@ -7,6 +7,8 @@ use xml::reader::XmlEvent;
 
 use serde::{Deserialize, Serialize};
 
+use crate::lexer::*;
+
 // TYPES DEFINITIONS
 pub type DocFreq = HashMap<String, usize>;
 pub type TermFreq = HashMap<String, usize>;
@@ -16,70 +18,6 @@ pub type TermFreqPerDoc = HashMap<PathBuf, (usize, TermFreq)>;
 pub struct Model {
     pub df: DocFreq,
     pub tfpd: TermFreqPerDoc,
-}
-
-#[derive(Debug)]
-pub struct Lexer<'a> {
-    content: &'a [char],
-}
-
-impl<'a> Lexer<'a> {
-    pub fn new(content: &'a [char]) -> Self {
-        Self { content }
-    }
-
-    fn trim_left(&mut self) {
-        while self.content.len() > 0 && self.content[0].is_whitespace() {
-            self.content = &self.content[1..];
-        }
-    }
-
-    fn chop(&mut self, n: usize) -> &'a [char] {
-        let token = &self.content[0..n];
-        self.content = &self.content[n..];
-        token
-    }
-
-    fn chop_while<P>(&mut self, mut predicate: P) -> &'a [char]
-    where
-        P: FnMut(&char) -> bool,
-    {
-        let mut n = 0;
-        while n < self.content.len() && predicate(&self.content[n]) {
-            n += 1;
-        }
-        self.chop(n)
-    }
-
-    fn next_token(&mut self) -> Option<String> {
-        self.trim_left();
-        if self.content.len() == 0 {
-            return None;
-        }
-
-        if self.content[0].is_numeric() {
-            return Some(self.chop_while(|x| x.is_numeric()).iter().collect());
-        }
-
-        if self.content[0].is_alphabetic() {
-            return Some(
-                self.chop_while(|x| x.is_alphanumeric())
-                    .iter()
-                    .map(|x| x.to_ascii_uppercase())
-                    .collect(),
-            );
-        }
-
-        Some(self.chop(1).iter().collect())
-    }
-}
-
-impl<'a> Iterator for Lexer<'a> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.next_token()
-    }
 }
 
 pub fn compute_tf(t: &str, d: &(usize, TermFreq)) -> f32 {
@@ -138,20 +76,21 @@ pub fn add_folder_to_model(dir_path: &Path, model: &mut Model) {
                 }
             }
 
+            let mut term_sum: usize = 0;
             for t in tf.keys() {
                 if let Some(freq) = model.df.get_mut(t) {
                     *freq += 1;
                 } else {
                     model.df.insert(t.to_string(), 1);
                 };
+                term_sum += 1;
             }
 
             let mut stats = tf.iter().collect::<Vec<_>>();
             stats.sort_by_key(|(_, f)| *f);
             stats.reverse();
 
-            let terms_sum: usize = tf.keys().count();
-            model.tfpd.insert(file_path, (terms_sum, tf));
+            model.tfpd.insert(file_path, (term_sum, tf));
         }
     }
 }
@@ -163,7 +102,7 @@ pub fn save_model_as_json(index_file: &str, model: &Model) -> std::io::Result<()
     let index_file = BufWriter::new(index_file);
     serde_json::to_writer(index_file, model).map_err(|err| {
         eprintln!("Error: couldn't save model as JSON; {err}");
-    });
+    }).unwrap();
     Ok(())
 }
 
